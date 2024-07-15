@@ -45,7 +45,7 @@ static async Task HandleSocket(WebSocket webSocket)
     var ep = new IPEndPoint(IPAddress.Parse("192.168.178.57"), 21324);
     const int MaxLedPerPacket = 489;
     const int SendLedsPerPacket = 870 / 2;
-    const int leds = 870;
+    const int leds = 239 * 2 + 196 * 2; // = 870
     byte[] sendBuf = new byte[2 + 2 + MaxLedPerPacket * 3];
 
 
