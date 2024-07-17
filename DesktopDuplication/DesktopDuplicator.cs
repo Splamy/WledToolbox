@@ -1,8 +1,8 @@
-﻿using System;
-
-using SharpDX;
+﻿using SharpDX;
 using SharpDX.Mathematics.Interop;
-
+using System;
+using System.Collections.Immutable;
+using System.Linq;
 using d2 = SharpDX.Direct2D1;
 using d3d = SharpDX.Direct3D11;
 using dxgi = SharpDX.DXGI;
@@ -18,39 +18,40 @@ namespace DesktopDuplication
     {
         private d3d.Device1 d3dDevice;
         private d3d.DeviceContext1 d3dContext;
-        private d3d.Texture2DDescription _readTextureDescr;
-        private d3d.Texture2DDescription _intermediateTextureDescr;
-        private d3d.Texture2DDescription _intermediateTextureAltDescr;
         private dxgi.Device dxgiDevice;
         private d2.Device d2dDevice;
         private d2.DeviceContext d2dContext;
-        private dxgi.OutputDescription mOutputDesc;
-        private dxgi.OutputDuplication mDeskDupl;
+        private dxgi.OutputDuplication? _outputDuplication;
 
         private d3d.Texture2D _readTexture2d = null;
         private d3d.Texture2D _intermediateTexture2d;
         private d3d.Texture2D _intermediateTextureAlt2d;
-        private int mWhichOutputDevice = -1;
 
-        private readonly sd.Bitmap gdiOutImage;
+        private Size2 _readTextureSize = new(239, 100);
 
-        private Size2 _readTextureSize = new(239, 2);
+        public ImmutableArray<dxgi.Output> Outputs { get; }
+
+        private dxgi.Output? _activeOutput = null;
+        private dxgi.OutputDescription _activeOutputDescription;
+        public dxgi.Output? SelectedOutput { get; set; }
+
+        public sd.Bitmap GdiOutImage { get; }
+
+        public float BlurAmount { get; set; } = 3f;
 
         /// <summary>
         /// Duplicates the output of the specified monitor.
         /// </summary>
         /// <param name="whichMonitor">The output device to duplicate (i.e. monitor). Begins with zero, which seems to correspond to the primary monitor.</param>
-        public DesktopDuplicator(int whichMonitor)
-            : this(0, whichMonitor) { }
+        public DesktopDuplicator() : this(0) { }
 
         /// <summary>
         /// Duplicates the output of the specified monitor on the specified graphics adapter.
         /// </summary>
         /// <param name="whichGraphicsCardAdapter">The adapter which contains the desired outputs.</param>
         /// <param name="whichOutputDevice">The output device to duplicate (i.e. monitor). Begins with zero, which seems to correspond to the primary monitor.</param>
-        public DesktopDuplicator(int whichGraphicsCardAdapter, int whichOutputDevice)
+        public DesktopDuplicator(int whichGraphicsCardAdapter)
         {
-            this.mWhichOutputDevice = whichOutputDevice;
             dxgi.Adapter1 adapter;
             try
             {
@@ -65,22 +66,10 @@ namespace DesktopDuplication
 
             d3dContext = d3dDevice.ImmediateContext.QueryInterface<d3d.DeviceContext1>();
 
-            dxgi.Output output;
-            try
-            {
-                output = adapter.GetOutput(whichOutputDevice);
-            }
-            catch (SharpDXException)
-            {
-                throw new DesktopDuplicationException("Could not find the specified output device.");
-            }
-
-            var output1 = output.QueryInterface<dxgi.Output1>();
-            this.mOutputDesc = output.Description;
-
-            _intermediateTextureDescr = new d3d.Texture2DDescription()
+            _intermediateTexture2d = new d3d.Texture2D(d3dDevice, new d3d.Texture2DDescription()
             {
                 CpuAccessFlags = d3d.CpuAccessFlags.None,
+                // RenderTarget allows writing, ShaderResource allows reading
                 BindFlags = d3d.BindFlags.RenderTarget | d3d.BindFlags.ShaderResource,
                 Format = dxgi.Format.B8G8R8A8_UNorm,
                 Width = _readTextureSize.Width,
@@ -90,9 +79,9 @@ namespace DesktopDuplication
                 ArraySize = 1,
                 SampleDescription = { Count = 1, Quality = 0 },
                 Usage = d3d.ResourceUsage.Default,
-            };
+            });
 
-            _intermediateTextureAltDescr = new d3d.Texture2DDescription()
+            _intermediateTextureAlt2d = new d3d.Texture2D(d3dDevice, new d3d.Texture2DDescription()
             {
                 CpuAccessFlags = d3d.CpuAccessFlags.None,
                 BindFlags = d3d.BindFlags.RenderTarget,
@@ -104,10 +93,11 @@ namespace DesktopDuplication
                 ArraySize = 1,
                 SampleDescription = { Count = 1, Quality = 0 },
                 Usage = d3d.ResourceUsage.Default,
-            };
+            });
 
-            _readTextureDescr = new d3d.Texture2DDescription()
+            _readTexture2d = new d3d.Texture2D(d3dDevice, new d3d.Texture2DDescription()
             {
+                // Read lets the cpu read the texture after processing
                 CpuAccessFlags = d3d.CpuAccessFlags.Read,
                 BindFlags = d3d.BindFlags.None,
                 Format = dxgi.Format.B8G8R8A8_UNorm,
@@ -117,47 +107,42 @@ namespace DesktopDuplication
                 MipLevels = 1,
                 ArraySize = 1,
                 SampleDescription = { Count = 1, Quality = 0 },
+                // Staging lets the cpu read the texture after processing
                 Usage = d3d.ResourceUsage.Staging,
-            };
+            });
 
             dxgiDevice = d3dDevice.QueryInterface<dxgi.Device>();
             d2dDevice = new d2.Device(dxgiDevice);
             d2dContext = new d2.DeviceContext(d2dDevice, d2.DeviceContextOptions.None);
 
-            try
-            {
-                this.mDeskDupl = output1.DuplicateOutput(this.d3dDevice);
-            }
-            catch (SharpDXException ex)
-            {
-                if (ex.ResultCode.Code == dxgi.ResultCode.NotCurrentlyAvailable.Result.Code)
-                {
-                    throw new DesktopDuplicationException("There is already the maximum number of applications using the Desktop Duplication API running, please close one of the applications and try again.");
-                }
-            }
+            Outputs = [.. dxgiDevice.Adapter.Outputs];
+            SelectedOutput = Outputs.FirstOrDefault();
 
-            gdiOutImage = new sd.Bitmap(_readTextureSize.Width, _readTextureSize.Height, sdi.PixelFormat.Format32bppRgb);
+            GdiOutImage = new sd.Bitmap(_readTextureSize.Width, _readTextureSize.Height, sdi.PixelFormat.Format32bppRgb);
         }
 
         /// <summary>
         /// Retrieves the latest desktop image and associated metadata.
         /// </summary>
-        public DesktopFrame GetLatestFrame()
+        public bool GetLatestFrame()
         {
-            var frame = new DesktopFrame();
+            CheckCurrentOutputDevice();
+
+            if (_activeOutput == null)
+                return false;
+
             // Try to get the latest frame; this may timeout
-            bool retrievalTimedOut = RetrieveFrame();
-            if (retrievalTimedOut)
-                return null;
+            if (!RetrieveFrame())
+                return false;
 
             try
             {
-                ProcessFrame(frame);
-                return frame;
+                ProcessFrame();
+                return true;
             }
             catch
             {
-                return null;
+                return false;
             }
             finally
             {
@@ -165,27 +150,54 @@ namespace DesktopDuplication
             }
         }
 
+        private void CheckCurrentOutputDevice()
+        {
+            if (SelectedOutput != _activeOutput)
+            {
+                if (_outputDuplication != null)
+                {
+                    _outputDuplication.Dispose();
+                    _outputDuplication = null;
+                }
+                _activeOutput = null;
+                _activeOutputDescription = default;
+
+                if (SelectedOutput != null)
+                {
+                    var output1 = SelectedOutput.QueryInterface<dxgi.Output1>();
+
+                    try
+                    {
+                        _outputDuplication = output1.DuplicateOutput(d3dDevice);
+                    }
+                    catch (SharpDXException ex)
+                    {
+                        if (ex.ResultCode.Code == dxgi.ResultCode.NotCurrentlyAvailable.Result.Code)
+                        {
+                            throw new DesktopDuplicationException("There is already the maximum number of applications using the Desktop Duplication API running, please close one of the applications and try again.");
+                        }
+
+                        throw;
+                    }
+
+                    _activeOutput = SelectedOutput;
+                    _activeOutputDescription = SelectedOutput.Description;
+                }
+            }
+        }
+
         private bool RetrieveFrame()
         {
-            _readTexture2d ??= new d3d.Texture2D(d3dDevice, _readTextureDescr);
-            _intermediateTexture2d ??= new d3d.Texture2D(d3dDevice, _intermediateTextureDescr);
-            _intermediateTextureAlt2d ??= new d3d.Texture2D(d3dDevice, _intermediateTextureAltDescr);
-
-            var result = mDeskDupl.TryAcquireNextFrame(500, out var frameInfo, out var desktopResource);
+            var result = _outputDuplication.TryAcquireNextFrame(500, out var frameInfo, out var desktopResource);
 
             if (result.Failure)
             {
-                if (result.Code == dxgi.ResultCode.WaitTimeout.Result.Code)
-                {
-                    return true;
-                }
                 if (result.Code == dxgi.ResultCode.AccessLost.Result.Code)
                 {
-                    _readTexture2d.Dispose();
-                    _readTexture2d = null;
-                    return false;
+                    _activeOutput = null;
                 }
-                throw new DesktopDuplicationException("Failed to acquire next frame.");
+
+                return false;
             }
 
             using var __desktopResource = desktopResource;
@@ -199,21 +211,37 @@ namespace DesktopDuplication
             using var intermediateAltSurface = _intermediateTextureAlt2d.QueryInterface<dxgi.Surface>();
             using var intermediateAltBitmap = new d2.Bitmap1(d2dContext, intermediateAltSurface);
 
-            //var gaussianBlurEffect = new d2.Effects.GaussianBlur(d2dContext);
-            //gaussianBlurEffect.SetInput(0, desktopBitmap, true);
-            //gaussianBlurEffect.StandardDeviation = 5f;
-
-            //var scaleEffect = new d2.Effects.Scale(d2dContext);
-            //scaleEffect.SetInput(0, gaussianBlurEffect.Output, true);
-            //scaleEffect.CenterPoint = new RawVector2(0, 0);
-            //scaleEffect.ScaleAmount = new RawVector2(mOutputDesc.DesktopBounds.Width(), 1);
-
             var small = _readTextureSize;
+            d2.Image pipeImage = desktopBitmap;
+
+            var cropEffect = new d2.Effects.Crop(d2dContext);
+            cropEffect.SetInput(0, pipeImage, true);
+            cropEffect.Rectangle = new RawVector4(0, 0,
+                _activeOutputDescription.DesktopBounds.Width(),
+                _activeOutputDescription.DesktopBounds.Height() / 2);
+            pipeImage = cropEffect.Output;
+
+            var scaleEffect = new d2.Effects.Scale(d2dContext);
+            scaleEffect.SetInput(0, pipeImage, true);
+            scaleEffect.InterpolationMode = d2.InterpolationMode.HighQualityCubic;
+            scaleEffect.CenterPoint = new RawVector2(0, 0);
+            scaleEffect.ScaleAmount = new RawVector2(
+                small.Width / (float)_activeOutputDescription.DesktopBounds.Width(),
+                small.Height / (float)_activeOutputDescription.DesktopBounds.Height());
+            pipeImage = scaleEffect.Output;
+
+            if (BlurAmount > 0)
+            {
+                var gaussianBlurEffect = new d2.Effects.GaussianBlur(d2dContext);
+                gaussianBlurEffect.SetInput(0, pipeImage, true);
+                gaussianBlurEffect.StandardDeviation = BlurAmount;
+                pipeImage = gaussianBlurEffect.Output;
+            }
 
             d2dContext.Target = intermediateAltBitmap;
             d2dContext.BeginDraw();
-            //d2dContext.DrawImage(desktopBitmap, d2.InterpolationMode.HighQualityCubic, d2.CompositeMode.SourceOver);
-            d2dContext.DrawBitmap(desktopBitmap, new RawRectangleF(0, 0, small.Width, small.Height), 1, d2.InterpolationMode.HighQualityCubic, null, null);
+            d2dContext.DrawImage(pipeImage, d2.InterpolationMode.Linear, d2.CompositeMode.SourceOver);
+            //d2dContext.DrawBitmap(desktopBitmap, new RawRectangleF(0, 0, small.Width, small.Height), 1, d2.InterpolationMode.HighQualityCubic, null, null);
             d2dContext.EndDraw();
 
             //d2dContext.Target = intermediateAltBitmap;
@@ -222,25 +250,25 @@ namespace DesktopDuplication
             //d2dContext.DrawBitmap(intermediateBitmap, new RawRectangleF(small.Right, 0, small.Right + 300, 300), 1, d2.InterpolationMode.NearestNeighbor, small, null);
             //d2dContext.EndDraw();
 
-            d3dDevice.ImmediateContext.CopyResource(_intermediateTextureAlt2d, _readTexture2d);
+            d3dContext.CopyResource(_intermediateTextureAlt2d, _readTexture2d);
 
-            return false;
+            return true;
         }
 
-        private void ProcessFrame(DesktopFrame frame)
+        private void ProcessFrame()
         {
             // Get the desktop capture texture
-            var mapSource = d3dDevice.ImmediateContext.MapSubresource(_readTexture2d, 0, d3d.MapMode.Read, d3d.MapFlags.None);
+            var mapSource = d3dContext.MapSubresource(_readTexture2d, 0, d3d.MapMode.Read, d3d.MapFlags.None);
 
-            var boundsRect = new sd.Rectangle(0, 0, gdiOutImage.Width, gdiOutImage.Height);
+            var boundsRect = new sd.Rectangle(0, 0, GdiOutImage.Width, GdiOutImage.Height);
             // Copy pixels from screen capture Texture to GDI bitmap
-            var mapDest = gdiOutImage.LockBits(boundsRect, sdi.ImageLockMode.WriteOnly, gdiOutImage.PixelFormat);
+            var mapDest = GdiOutImage.LockBits(boundsRect, sdi.ImageLockMode.WriteOnly, GdiOutImage.PixelFormat);
             var sourcePtr = mapSource.DataPointer;
             var destPtr = mapDest.Scan0;
-            for (int y = 0; y < gdiOutImage.Height; y++)
+            for (int y = 0; y < GdiOutImage.Height; y++)
             {
                 // Copy a single line 
-                Utilities.CopyMemory(destPtr, sourcePtr, gdiOutImage.Width * 4);
+                Utilities.CopyMemory(destPtr, sourcePtr, GdiOutImage.Width * 4);
 
                 // Advance pointers
                 sourcePtr = IntPtr.Add(sourcePtr, mapSource.RowPitch);
@@ -248,16 +276,15 @@ namespace DesktopDuplication
             }
 
             // Release source and dest locks
-            gdiOutImage.UnlockBits(mapDest);
-            d3dDevice.ImmediateContext.UnmapSubresource(_readTexture2d, 0);
-            frame.DesktopImage = gdiOutImage;
+            GdiOutImage.UnlockBits(mapDest);
+            d3dContext.UnmapSubresource(_readTexture2d, 0);
         }
 
         private void ReleaseFrame()
         {
             try
             {
-                mDeskDupl.ReleaseFrame();
+                _outputDuplication.ReleaseFrame();
             }
             catch (SharpDXException ex)
             {
