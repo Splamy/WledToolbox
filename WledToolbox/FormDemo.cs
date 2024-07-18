@@ -54,7 +54,6 @@ namespace DesktopDuplication.Demo
 
         private async Task WorkTask()
         {
-
             while (await updateTimer.WaitForNextTickAsync())
             {
                 if (!desktopDuplicator.GetLatestFrame())
@@ -62,23 +61,26 @@ namespace DesktopDuplication.Demo
                     continue;
                 }
 
-                if (Monitor.TryEnter(pictureBox2.PaintLock))
+                if (checkDebugOutputImage.Checked)
                 {
-                    try
+                    if (Monitor.TryEnter(pictureBox2.PaintLock))
                     {
-                        using var g = Graphics.FromImage(bitmap);
-                        g.DrawImage(desktopDuplicator.GdiOutImage, 0, 0);
+                        try
+                        {
+                            using var g = Graphics.FromImage(bitmap);
+                            g.DrawImage(desktopDuplicator.GdiOutImage, 0, 0);
+                        }
+                        finally
+                        {
+                            Monitor.Exit(pictureBox2.PaintLock);
+                        }
                     }
-                    finally
-                    {
-                        Monitor.Exit(pictureBox2.PaintLock);
-                    }
-                }
 
-                Invoke(() =>
-                {
-                    pictureBox2.Refresh();
-                });
+                    Invoke(() =>
+                    {
+                        pictureBox2.Refresh();
+                    });
+                }
 
                 if (sendWledDataCheckbox.Checked)
                 {
@@ -116,6 +118,18 @@ namespace DesktopDuplication.Demo
                         sendBuf[offset + i * 3 + 2] = pixel.B;
                     }
                 }
+
+                void SetInv(int offset, Span<BGRAPixel> pixels)
+                {
+                    for (int i = 1; i < pixels.Length; i++)
+                    {
+                        var pixel = pixels[^i];
+                        sendBuf[offset + i * 3 + 0] = pixel.R;
+                        sendBuf[offset + i * 3 + 1] = pixel.G;
+                        sendBuf[offset + i * 3 + 2] = pixel.B;
+                    }
+                }
+
                 void Fill(int offset, int length, BGRAPixel color)
                 {
                     for (int i = 0; i < length; i++)
@@ -132,16 +146,14 @@ namespace DesktopDuplication.Demo
 
                 unsafe void Map1()
                 {
-                    var pixelsR0 = new Span<BGRAPixel>((void*)bitMapData.Scan0, bitMapData.Width * 2);
-                    Span<BGRAPixel> tmpBuf = stackalloc BGRAPixel[239];
-                    // write first 239 LEDs into tmpBuf reversed
-                    for (int i = 0; i < 239; i++)
-                    {
-                        tmpBuf[i] = pixelsR0[239 - i];
-                    }
+                    var pixelsR0 = new Span<BGRAPixel>((void*)bitMapData.Scan0, bitMapData.Width * 3);
+                    var frontSpan = pixelsR0[(239 * 0)..(239 * 0 + 239)];
+                    var leftSpan = pixelsR0[(239 * 1)..(239 * 1 + 196)];
 
-                    Set(4 + 0, tmpBuf);
-                    Fill(4 + (239 * 3), 196, pixelsR0[0]);
+                    // Front
+                    SetInv(4 + 0, frontSpan);
+                    // Left
+                    SetInv(4 + (239 * 3), leftSpan);
 
                     sendBuf[2] = 0x00;
                     sendBuf[3] = 0x00;
@@ -153,10 +165,13 @@ namespace DesktopDuplication.Demo
 
                 unsafe void Map2()
                 {
-                    var pixelsR0 = new Span<BGRAPixel>((void*)bitMapData.Scan0, bitMapData.Width * 2);
+                    var pixelsR0 = new Span<BGRAPixel>((void*)bitMapData.Scan0, bitMapData.Width * 3);
+                    var rightSpan = pixelsR0[(239 * 2)..(239 * 2 + 196)];
 
-                    Set(4 + 0, pixelsR0[239..478]);
-                    Fill(4 + (239 * 3), 196, pixelsR0[238]);
+                    // Back
+                    Fill(4 + 0, 239, default);
+                    // Right
+                    SetInv(4 + (239 * 3), rightSpan);
 
                     Span<byte> writeOffBytes = stackalloc byte[2];
                     BinaryPrimitives.WriteUInt16BigEndian(writeOffBytes, 239 + 196);

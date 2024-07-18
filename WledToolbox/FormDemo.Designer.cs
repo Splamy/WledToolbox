@@ -33,6 +33,7 @@
             label1 = new System.Windows.Forms.Label();
             sendWledDataCheckbox = new System.Windows.Forms.CheckBox();
             groupBox1 = new System.Windows.Forms.GroupBox();
+            checkDebugOutputImage = new System.Windows.Forms.CheckBox();
             label2 = new System.Windows.Forms.Label();
             trackBar1 = new System.Windows.Forms.TrackBar();
             ((System.ComponentModel.ISupportInitialize)pictureBox2).BeginInit();
@@ -75,7 +76,7 @@
             // 
             sendWledDataCheckbox.AutoSize = true;
             sendWledDataCheckbox.CheckAlign = System.Drawing.ContentAlignment.MiddleRight;
-            sendWledDataCheckbox.Location = new System.Drawing.Point(28, 46);
+            sendWledDataCheckbox.Location = new System.Drawing.Point(28, 71);
             sendWledDataCheckbox.Name = "sendWledDataCheckbox";
             sendWledDataCheckbox.Size = new System.Drawing.Size(91, 19);
             sendWledDataCheckbox.TabIndex = 3;
@@ -85,6 +86,7 @@
             // groupBox1
             // 
             groupBox1.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left;
+            groupBox1.Controls.Add(checkDebugOutputImage);
             groupBox1.Controls.Add(label2);
             groupBox1.Controls.Add(trackBar1);
             groupBox1.Controls.Add(label1);
@@ -97,10 +99,21 @@
             groupBox1.TabStop = false;
             groupBox1.Text = "groupBox1";
             // 
+            // checkDebugOutputImage
+            // 
+            checkDebugOutputImage.AutoSize = true;
+            checkDebugOutputImage.CheckAlign = System.Drawing.ContentAlignment.MiddleRight;
+            checkDebugOutputImage.Location = new System.Drawing.Point(28, 46);
+            checkDebugOutputImage.Name = "checkDebugOutputImage";
+            checkDebugOutputImage.Size = new System.Drawing.Size(136, 19);
+            checkDebugOutputImage.TabIndex = 6;
+            checkDebugOutputImage.Text = "Debug output image";
+            checkDebugOutputImage.UseVisualStyleBackColor = true;
+            // 
             // label2
             // 
             label2.AutoSize = true;
-            label2.Location = new System.Drawing.Point(28, 81);
+            label2.Location = new System.Drawing.Point(28, 106);
             label2.Name = "label2";
             label2.Size = new System.Drawing.Size(73, 15);
             label2.TabIndex = 5;
@@ -108,7 +121,7 @@
             // 
             // trackBar1
             // 
-            trackBar1.Location = new System.Drawing.Point(104, 71);
+            trackBar1.Location = new System.Drawing.Point(104, 96);
             trackBar1.Maximum = 20;
             trackBar1.Name = "trackBar1";
             trackBar1.Size = new System.Drawing.Size(214, 45);
@@ -145,6 +158,7 @@
         private System.Windows.Forms.GroupBox groupBox1;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.TrackBar trackBar1;
+        private System.Windows.Forms.CheckBox checkDebugOutputImage;
     }
 }
 
