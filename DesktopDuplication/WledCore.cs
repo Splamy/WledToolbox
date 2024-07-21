@@ -1,14 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Sockets;
-using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 using System.Buffers.Binary;
-using System.Drawing.Imaging;
-using System.Drawing;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace DesktopDuplication;
 
@@ -21,7 +16,7 @@ public class WledCore
     private const int leds = 239 * 2 + 196 * 2; // = 870
     private readonly byte[] sendBuf = new byte[2 + 2 + leds * 3];
 
-    public async Task Send(Bitmap image)
+    public async Task Send(Memory<BGRAPixel> image)
     {
         // Syncs are:
         // 1)
@@ -32,11 +27,6 @@ public class WledCore
         // Right: 196 LEDs
 
         //var image = desktopDuplicator.GdiOutImage;
-
-        var bitMapData = image.LockBits(
-            new Rectangle(0, 0, image.Width, image.Height),
-            ImageLockMode.ReadOnly,
-            image.PixelFormat);
 
         try
         {
@@ -76,9 +66,9 @@ public class WledCore
             sendBuf[1] = 0x10;
 
 
-            unsafe void Map1()
+            void Map1()
             {
-                var pixelsR0 = new Span<BGRAPixel>((void*)bitMapData.Scan0, bitMapData.Width * 3);
+                var pixelsR0 = image.Span;
                 var frontSpan = pixelsR0[(239 * 0)..(239 * 0 + 239)];
                 var leftSpan = pixelsR0[(239 * 1)..(239 * 1 + 196)];
 
@@ -95,9 +85,9 @@ public class WledCore
 
             await udp.SendAsync(sendBuf.AsMemory(0, 4 + SendLedsPerPacket * 3), ep);
 
-            unsafe void Map2()
+            void Map2()
             {
-                var pixelsR0 = new Span<BGRAPixel>((void*)bitMapData.Scan0, bitMapData.Width * 3);
+                var pixelsR0 = image.Span;
                 var rightSpan = pixelsR0[(239 * 2)..(239 * 2 + 196)];
 
                 // Back
@@ -118,18 +108,13 @@ public class WledCore
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Invalid JSON: {0}", ex.Message);
-        }
-        finally
-        {
-            image.UnlockBits(bitMapData);
         }
     }
 }
 
 
 [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 4)]
-struct BGRAPixel
+public struct BGRAPixel
 {
     public byte B;
     public byte G;

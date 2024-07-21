@@ -17,33 +17,46 @@ namespace DesktopDuplication;
 /// </summary>
 public class DesktopDuplicator
 {
-    private dxgi.Adapter1 dxgiAdapter;
-    private dxgi.Factory1 dxgiFactory;
-    private d3d.Device1 d3dDevice;
-    private d3d.DeviceContext1 d3dContext;
-    private dxgi.Device dxgiDevice;
-    private d2.Device d2dDevice;
-    private d2.DeviceContext d2dContext;
+    private readonly dxgi.Adapter1 dxgiAdapter;
+    private readonly dxgi.Factory1 dxgiFactory;
+    private readonly d3d.Device1 d3dDevice;
+    private readonly d3d.DeviceContext1 d3dContext;
+    private readonly dxgi.Device dxgiDevice;
+    private readonly d2.Device d2dDevice;
+    private readonly d2.DeviceContext d2dContext;
     private dxgi.OutputDuplication? _outputDuplication;
 
-    private TextureHelper _readTexture2d;
-    private TextureHelper _utilTexRW;
-    private TextureHelper _utilTexW;
+    private TextureHelper _mainDataStage;
+    private TextureHelper _mainDataWrite;
 
-    private Size2 _utilTexSize = new(239, 196);
-    private Size2 _outTexSize = new(239, 3);
+    private TextureHelper _miniImageWrite;
+    private TextureHelper _miniImageStage;
+
+    public Size2 InputTexSize { get; } = new(239, 196);
+    public Size2 OutputTexSize { get; } = new(239, 3);
 
     public ImmutableArray<dxgi.Output> Outputs { get; }
 
     private dxgi.Output? _activeOutput = null;
     private dxgi.OutputDescription _activeOutputDescription;
-    private Pipeline _pipeline;
-    private EffectBox _effectBox;
+    private Pipeline? _pipeline;
+    private EffectBox? _effectBox;
 
     public dxgi.Output? SelectedOutput { get; set; }
-    public sd.Bitmap GdiOutImage { get; }
-    public TextureHelper OutTexture => _readTexture2d;
+    public bool CopyMiniImageOut { get; set; } = false;
+    public sd.Bitmap MiniImage { get; private set; }
+    public BGRAPixel[] OutData { get; }
+    public TextureHelper OutTexture => _mainDataStage;
 
+    public RawRectangle PreCrop { get; set; } = new(0, 0, 0, 0);
+    private RawVector4 PreCropFloat => new(
+        PreCrop.Left,
+        PreCrop.Top,
+        _activeOutputDescription.DesktopBounds.Width() - PreCrop.Right,
+        _activeOutputDescription.DesktopBounds.Height() - PreCrop.Bottom);
+    private RawVector2 PreScaleFloat => new(
+        InputTexSize.Width / PreCropFloat.Z,
+        InputTexSize.Height / PreCropFloat.W);
     public float BlurAmount { get; set; } = 3f;
     public RawVector3 Gamma { get; set; } = new(1f, 1f, 1f);
     public (RawVector2 Black, RawVector2 White) Brightness { get; set; } = (new(0f, 0f), new(1f, 1f));
@@ -79,14 +92,16 @@ public class DesktopDuplicator
         d2dDevice = new d2.Device(dxgiDevice);
         d2dContext = new d2.DeviceContext(d2dDevice, d2.DeviceContextOptions.None);
 
-        _utilTexRW = CreateTexture(_utilTexSize, TextureHelperType.ReadWrite);
-        _utilTexW = CreateTexture(_outTexSize, TextureHelperType.Write);
-        _readTexture2d = CreateTexture(_outTexSize, TextureHelperType.Stage);
+        _mainDataWrite = CreateTexture(OutputTexSize, TextureHelperType.Write);
+        _mainDataStage = CreateTexture(OutputTexSize, TextureHelperType.Stage);
+        _miniImageWrite = CreateTexture(InputTexSize, TextureHelperType.Write);
+        _miniImageStage = CreateTexture(InputTexSize, TextureHelperType.Stage);
 
         Outputs = [.. dxgiDevice.Adapter.Outputs];
         SelectedOutput = Outputs.FirstOrDefault();
 
-        GdiOutImage = new sd.Bitmap(_outTexSize.Width, _outTexSize.Height, sdi.PixelFormat.Format32bppRgb);
+        MiniImage = new sd.Bitmap(InputTexSize.Width, InputTexSize.Height, sdi.PixelFormat.Format32bppRgb);
+        OutData = new BGRAPixel[OutputTexSize.Width * OutputTexSize.Height];
     }
 
     private TextureHelper CreateTexture(Size2 size, TextureHelperType type)
@@ -127,22 +142,14 @@ public class DesktopDuplicator
             return false;
 
         // Try to get the latest frame; this may timeout
-        if (!RetrieveFrame())
+        using var release = RetrieveFrame();
+
+        if (!release.Ok)
             return false;
 
-        try
-        {
-            ProcessFrame();
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-        finally
-        {
-            ReleaseFrame();
-        }
+        WriteOutputBuffer();
+        WriteMiniInputBuffer();
+        return true;
     }
 
     private void CheckCurrentOutputDevice()
@@ -197,48 +204,57 @@ public class DesktopDuplicator
         _pipeline = new Pipeline(d2dContext);
         _effectBox = new EffectBox();
 
-        var scaled = _pipeline.EffectScale(null, new RawVector2(
-            _utilTexSize.Width / (float)_activeOutputDescription.DesktopBounds.Width(),
-            _utilTexSize.Height / (float)_activeOutputDescription.DesktopBounds.Height()));
-        _effectBox.TrackInput(scaled);
+        var inputT1 = _pipeline.EffectRotate(null!, 0, new Size2(0, 0));
+        var inputT2 = _pipeline.EffectScale(inputT1.Output, new RawVector2(1, 1));
 
-        var top = scaled;
-        top = _pipeline.EffectCrop(top.Output, new RawVector4(0f, 0f, _utilTexSize.Width, _utilTexSize.Height / 2f));
-        top = _pipeline.EffectScale(top.Output, new RawVector2(1f, 2f / _utilTexSize.Height));
-        top = _pipeline.EffectCrop(top.Output, new RawVector4(0f, 0f, _utilTexSize.Width, 1));
+        _effectBox.PreCrop = ((d2.Effects.AffineTransform2D)inputT1, (d2.Effects.Scale)inputT2);
+        _effectBox.TrackInput(inputT1);
+
+        var baseImage = inputT2;
+
+        var preview = baseImage;
+        preview = _pipeline.EffectBrightness(preview.Output, Brightness).TrackBrightness(_effectBox);
+        preview = _pipeline.EffectGamma(preview.Output, Gamma).TrackGamma(_effectBox);
+        preview = _pipeline.EffectBlur(preview.Output, BlurAmount).TrackBlur(_effectBox);
+        _effectBox.TrackOutput(preview);
+
+        var top = baseImage;
+        top = _pipeline.EffectCrop(top.Output, new RawVector4(0f, 0f, InputTexSize.Width, InputTexSize.Height / 2f));
+        top = _pipeline.EffectScale(top.Output, new RawVector2(1f, 2f / InputTexSize.Height));
+        top = _pipeline.EffectCrop(top.Output, new RawVector4(0f, 0f, InputTexSize.Width, 1));
         top = _pipeline.EffectClamp(top.Output);
         top = _pipeline.EffectBrightness(top.Output, Brightness).TrackBrightness(_effectBox);
         top = _pipeline.EffectGamma(top.Output, Gamma).TrackGamma(_effectBox);
         top = _pipeline.EffectBlur(top.Output, BlurAmount).TrackBlur(_effectBox);
-        top = _pipeline.EffectCrop(top.Output, new RawVector4(0f, 0f, _utilTexSize.Width, 1));
+        top = _pipeline.EffectCrop(top.Output, new RawVector4(0f, 0f, InputTexSize.Width, 1));
         _effectBox.TrackOutput(top);
 
-        var left = scaled;
-        left = _pipeline.EffectCrop(left.Output, new RawVector4(0f, 0f, _utilTexSize.Width / 4f, _utilTexSize.Height));
-        left = _pipeline.EffectRotate(left.Output, 3 * MathF.PI / 2f, new Size2(_utilTexSize.Height, 0));
-        left = _pipeline.EffectScale(left.Output, new RawVector2(1f, 4f / _utilTexSize.Width));
-        left = _pipeline.EffectCrop(left.Output, new RawVector4(0f, 0f, _utilTexSize.Height, 1));
+        var left = baseImage;
+        left = _pipeline.EffectCrop(left.Output, new RawVector4(0f, 0f, InputTexSize.Width / 4f, InputTexSize.Height));
+        left = _pipeline.EffectRotate(left.Output, 3 * MathF.PI / 2f, new Size2(InputTexSize.Height, 0));
+        left = _pipeline.EffectScale(left.Output, new RawVector2(1f, 4f / InputTexSize.Width));
+        left = _pipeline.EffectCrop(left.Output, new RawVector4(0f, 0f, InputTexSize.Height, 1));
         left = _pipeline.EffectClamp(left.Output);
         left = _pipeline.EffectBrightness(left.Output, Brightness).TrackBrightness(_effectBox);
         left = _pipeline.EffectGamma(left.Output, Gamma).TrackGamma(_effectBox);
         left = _pipeline.EffectBlur(left.Output, BlurAmount).TrackBlur(_effectBox);
-        left = _pipeline.EffectCrop(left.Output, new RawVector4(0f, 0f, _utilTexSize.Height, 1));
+        left = _pipeline.EffectCrop(left.Output, new RawVector4(0f, 0f, InputTexSize.Height, 1));
         _effectBox.TrackOutput(left);
 
-        var right = scaled;
-        right = _pipeline.EffectCrop(right.Output, new RawVector4(3f * _utilTexSize.Width / 4f, 0f, _utilTexSize.Width, _utilTexSize.Height));
-        right = _pipeline.EffectRotate(right.Output, MathF.PI / 2f, new Size2(0, _utilTexSize.Width));
-        right = _pipeline.EffectScale(right.Output, new RawVector2(1f, 4f / _utilTexSize.Width));
-        right = _pipeline.EffectCrop(right.Output, new RawVector4(0f, 0f, _utilTexSize.Height, 1));
+        var right = baseImage;
+        right = _pipeline.EffectCrop(right.Output, new RawVector4(3f * InputTexSize.Width / 4f, 0f, InputTexSize.Width, InputTexSize.Height));
+        right = _pipeline.EffectRotate(right.Output, MathF.PI / 2f, new Size2(0, InputTexSize.Width));
+        right = _pipeline.EffectScale(right.Output, new RawVector2(1f, 4f / InputTexSize.Width));
+        right = _pipeline.EffectCrop(right.Output, new RawVector4(0f, 0f, InputTexSize.Height, 1));
         right = _pipeline.EffectClamp(right.Output);
         right = _pipeline.EffectBrightness(right.Output, Brightness).TrackBrightness(_effectBox);
         right = _pipeline.EffectGamma(right.Output, Gamma).TrackGamma(_effectBox);
         right = _pipeline.EffectBlur(right.Output, BlurAmount).TrackBlur(_effectBox);
-        right = _pipeline.EffectCrop(right.Output, new RawVector4(0f, 0f, _utilTexSize.Height, 1));
+        right = _pipeline.EffectCrop(right.Output, new RawVector4(0f, 0f, InputTexSize.Height, 1));
         _effectBox.TrackOutput(right);
     }
 
-    private bool RetrieveFrame()
+    private FrameInfo RetrieveFrame()
     {
         var result = _outputDuplication.TryAcquireNextFrame(500, out var frameInfo, out var desktopResource);
 
@@ -249,7 +265,7 @@ public class DesktopDuplicator
                 _activeOutput = null;
             }
 
-            return false;
+            return FrameInfo.Empty;
         }
 
         using var __desktopResource = desktopResource;
@@ -257,14 +273,50 @@ public class DesktopDuplicator
         using var desktopBitmap = new d2.Bitmap1(d2dContext, desktopSurface);
 
         _effectBox.SetInput(desktopBitmap);
+        if (_effectBox.PreCrop is ({ } trans, { } scale))
+        {
+            var sourceSize = new RawVector2(
+                _activeOutputDescription.DesktopBounds.Width(),
+                _activeOutputDescription.DesktopBounds.Height());
+            //var sourceCenter = new RawVector2(
+            //    sourceSize.X / 2f,
+            //    sourceSize.Y / 2f);
+
+            var croppedRectSize = new RawVector2(
+                sourceSize.X - (PreCrop.Left + PreCrop.Right),
+                sourceSize.Y - (PreCrop.Top + PreCrop.Bottom));
+            //var croppedRectCenter = new RawVector2(
+            //    PreCrop.Left + croppedRectSize.X / 2f,
+            //    PreCrop.Top + croppedRectSize.Y / 2f);
+            //var croppedCenterInSource = new RawVector2(
+            //    PreCrop.Left + croppedRectCenter.X,
+            //    PreCrop.Top + croppedRectCenter.Y);
+
+            var ratio = new RawVector2(
+                InputTexSize.Width / croppedRectSize.X,
+                InputTexSize.Height / croppedRectSize.Y);
+
+            //var inputTexCenter = new RawVector2(
+            //    InputTexSize.Width / 2f,
+            //    InputTexSize.Height / 2f);
+
+            trans.TransformMatrix = new RawMatrix3x2(
+                1, 0,
+                0, 1,
+                -PreCrop.Left, -PreCrop.Top);
+
+            scale.ScaleAmount = ratio;
+        }
         _effectBox.SetBlur(BlurAmount);
         _effectBox.SetGamma(Gamma);
         _effectBox.SetBrightness(Brightness);
-        var top = _effectBox.Outputs[0];
-        var left = _effectBox.Outputs[1];
-        var right = _effectBox.Outputs[2];
 
-        d2dContext.Target = _utilTexW.Bitmap;
+        var miniView = _effectBox.Outputs[0];
+        var top = _effectBox.Outputs[1];
+        var left = _effectBox.Outputs[2];
+        var right = _effectBox.Outputs[3];
+
+        d2dContext.Target = _mainDataWrite.Bitmap;
         d2dContext.BeginDraw();
         d2dContext.DrawImage(top, new RawVector2(0, 0), d2.InterpolationMode.Linear, d2.CompositeMode.SourceOver);
         d2dContext.DrawImage(left, new RawVector2(0, 1), d2.InterpolationMode.Linear, d2.CompositeMode.SourceOver);
@@ -279,25 +331,38 @@ public class DesktopDuplicator
         //d2dContext.DrawBitmap(intermediateBitmap, new RawRectangleF(small.Right, 0, small.Right + 300, 300), 1, d2.InterpolationMode.NearestNeighbor, small, null);
         //d2dContext.EndDraw();
 
-        d3dContext.CopyResource(_utilTexW.Texture, _readTexture2d.Texture);
+        d3dContext.CopyResource(_mainDataWrite.Texture, _mainDataStage.Texture);
 
-        return true;
+        if (CopyMiniImageOut)
+        {
+            d2dContext.Target = _miniImageWrite.Bitmap;
+            d2dContext.BeginDraw();
+            d2dContext.DrawImage(miniView, new RawVector2(0, 0), d2.InterpolationMode.Linear, d2.CompositeMode.SourceOver);
+            d2dContext.EndDraw();
+
+            d3dContext.CopyResource(_miniImageWrite.Texture, _miniImageStage.Texture);
+        }
+
+        return new FrameInfo(_outputDuplication.ReleaseFrame);
     }
 
-    private void ProcessFrame()
+    private unsafe void WriteMiniInputBuffer()
     {
-        // Get the desktop capture texture
-        var mapSource = d3dContext.MapSubresource(_readTexture2d.Texture, 0, d3d.MapMode.Read, d3d.MapFlags.None);
+        if (!CopyMiniImageOut)
+            return;
 
-        var boundsRect = new sd.Rectangle(0, 0, GdiOutImage.Width, GdiOutImage.Height);
+        // Get the desktop capture texture
+        var mapSource = d3dContext.MapSubresource(_miniImageStage.Texture, 0, d3d.MapMode.Read, d3d.MapFlags.None);
+
+        var boundsRect = new sd.Rectangle(0, 0, MiniImage.Width, MiniImage.Height);
         // Copy pixels from screen capture Texture to GDI bitmap
-        var mapDest = GdiOutImage.LockBits(boundsRect, sdi.ImageLockMode.WriteOnly, GdiOutImage.PixelFormat);
+        var mapDest = MiniImage.LockBits(boundsRect, sdi.ImageLockMode.WriteOnly, MiniImage.PixelFormat);
         var sourcePtr = mapSource.DataPointer;
         var destPtr = mapDest.Scan0;
-        for (int y = 0; y < GdiOutImage.Height; y++)
+        for (int y = 0; y < MiniImage.Height; y++)
         {
             // Copy a single line 
-            Utilities.CopyMemory(destPtr, sourcePtr, GdiOutImage.Width * 4);
+            Utilities.CopyMemory(destPtr, sourcePtr, MiniImage.Width * 4);
 
             // Advance pointers
             sourcePtr = IntPtr.Add(sourcePtr, mapSource.RowPitch);
@@ -305,24 +370,40 @@ public class DesktopDuplicator
         }
 
         // Release source and dest locks
-        GdiOutImage.UnlockBits(mapDest);
-        d3dContext.UnmapSubresource(_readTexture2d.Texture, 0);
+        MiniImage.UnlockBits(mapDest);
+        d3dContext.UnmapSubresource(_mainDataStage.Texture, 0);
     }
 
-    private void ReleaseFrame()
+    private unsafe void WriteOutputBuffer()
     {
-        try
+        // Get the desktop capture texture
+        var mapSource = d3dContext.MapSubresource(_mainDataStage.Texture, 0, d3d.MapMode.Read, d3d.MapFlags.None);
+
+        var sourcePtr = mapSource.DataPointer;
+
+        fixed (BGRAPixel* outDataPtr = OutData)
         {
-            _outputDuplication.ReleaseFrame();
-        }
-        catch (SharpDXException ex)
-        {
-            if (ex.ResultCode.Failure)
+            nint destPtr = (nint)outDataPtr;
+            int destStride = OutputTexSize.Width * 4;
+
+            for (int i = 0; i < OutputTexSize.Height; i++)
             {
-                throw new DesktopDuplicationException("Failed to release frame.");
+                Utilities.CopyMemory(destPtr, sourcePtr, destStride);
+
+                destPtr += destStride;
+                sourcePtr += mapSource.RowPitch;
             }
         }
+
+        d3dContext.UnmapSubresource(_mainDataStage.Texture, 0);
     }
+}
+
+readonly struct FrameInfo(Action? release) : IDisposable
+{
+    public static readonly FrameInfo Empty = new(null);
+    public readonly bool Ok => release != null;
+    public readonly void Dispose() => release?.Invoke();
 }
 
 class Pipeline : IDisposable
@@ -426,6 +507,7 @@ public class EffectBox
 {
     public List<d2.Effect> Inputs { get; } = [];
     public List<d2.Effect> Outputs { get; } = [];
+    public (d2.Effects.AffineTransform2D, d2.Effects.Scale)? PreCrop { get; set; } = null;
     public List<d2.Effects.GaussianBlur> Blurs { get; } = [];
     public List<d2.Effects.GammaTransfer> Gammas { get; } = [];
     public List<d2.Effects.Brightness> Brightnesses { get; } = [];
