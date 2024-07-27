@@ -7,6 +7,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DesktopDuplication", "Deskt
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WledToolbox", "WledToolbox\WledToolbox.csproj", "{5BFDB199-AC19-45AD-8A8A-18837449288D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShaderTests", "ShaderTests\ShaderTests.csproj", "{BCCBE220-ED91-4E53-9762-ADC0759CBBDF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{5BFDB199-AC19-45AD-8A8A-18837449288D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5BFDB199-AC19-45AD-8A8A-18837449288D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5BFDB199-AC19-45AD-8A8A-18837449288D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BCCBE220-ED91-4E53-9762-ADC0759CBBDF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BCCBE220-ED91-4E53-9762-ADC0759CBBDF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BCCBE220-ED91-4E53-9762-ADC0759CBBDF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BCCBE220-ED91-4E53-9762-ADC0759CBBDF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

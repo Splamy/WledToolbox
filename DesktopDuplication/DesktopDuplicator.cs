@@ -371,7 +371,7 @@ public class DesktopDuplicator
 
         // Release source and dest locks
         MiniImage.UnlockBits(mapDest);
-        d3dContext.UnmapSubresource(_mainDataStage.Texture, 0);
+        d3dContext.UnmapSubresource(_miniImageStage.Texture, 0);
     }
 
     private unsafe void WriteOutputBuffer()
