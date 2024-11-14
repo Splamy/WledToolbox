@@ -101,19 +101,20 @@ public partial class FormDemo : Form
             return;
         }
 
-        if (!Monitor.TryEnter(inputDebugPicture.PaintLock))
+        if (!inputDebugPicture.PaintLock.TryEnter())
         {
             return;
         }
 
         try
         {
+            ;
             using var g = Graphics.FromImage(inputBitmap);
             g.DrawImageUnscaled(desktopDuplicator.MiniImage, 0, 0);
         }
         finally
         {
-            Monitor.Exit(inputDebugPicture.PaintLock);
+            inputDebugPicture.PaintLock.Exit();
         }
 
         Invoke(() =>
@@ -129,7 +130,7 @@ public partial class FormDemo : Form
             return;
         }
 
-        if (!Monitor.TryEnter(outputDebugPicture.PaintLock))
+        if (!outputDebugPicture.PaintLock.TryEnter())
         {
             return;
         }
@@ -155,7 +156,7 @@ public partial class FormDemo : Form
         finally
         {
             outputBitmap.UnlockBits(mapDest);
-            Monitor.Exit(outputDebugPicture.PaintLock);
+            outputDebugPicture.PaintLock.Exit();
         }
 
         Invoke(() =>

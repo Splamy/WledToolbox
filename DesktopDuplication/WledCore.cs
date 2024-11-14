@@ -66,43 +66,30 @@ public class WledCore
             sendBuf[1] = 0x10;
 
 
-            void Map1()
-            {
-                var pixelsR0 = image.Span;
-                var frontSpan = pixelsR0[(239 * 0)..(239 * 0 + 239)];
-                var leftSpan = pixelsR0[(239 * 1)..(239 * 1 + 196)];
+            var pixelsR0 = image.Span;
+            var frontSpan = pixelsR0[(239 * 0)..(239 * 0 + 239)];
+            var leftSpan = pixelsR0[(239 * 1)..(239 * 1 + 196)];
 
-                // Front
-                SetInv(4 + 0, frontSpan);
-                // Left
-                SetInv(4 + (239 * 3), leftSpan);
+            // Front
+            SetInv(4 + 0, frontSpan);
+            // Left
+            SetInv(4 + (239 * 3), leftSpan);
 
-                sendBuf[2] = 0x00;
-                sendBuf[3] = 0x00;
-            }
-
-            Map1();
+            sendBuf[2] = 0x00;
+            sendBuf[3] = 0x00;
 
             await udp.SendAsync(sendBuf.AsMemory(0, 4 + SendLedsPerPacket * 3), ep);
 
-            void Map2()
-            {
-                var pixelsR0 = image.Span;
-                var rightSpan = pixelsR0[(239 * 2)..(239 * 2 + 196)];
 
-                // Back
-                Fill(4 + 0, 239, default);
-                // Right
-                SetInv(4 + (239 * 3), rightSpan);
+            pixelsR0 = image.Span;
+            var rightSpan = pixelsR0[(239 * 2)..(239 * 2 + 196)];
 
-                Span<byte> writeOffBytes = stackalloc byte[2];
-                BinaryPrimitives.WriteUInt16BigEndian(writeOffBytes, 239 + 196);
+            // Back
+            Fill(4 + 0, 239, default);
+            // Right
+            SetInv(4 + (239 * 3), rightSpan);
 
-                sendBuf[2] = writeOffBytes[0];
-                sendBuf[3] = writeOffBytes[1];
-            }
-
-            Map2();
+            BinaryPrimitives.WriteUInt16BigEndian(sendBuf.AsSpan(2, 2), 239 + 196);
 
             await udp.SendAsync(sendBuf.AsMemory(0, 4 + SendLedsPerPacket * 3), ep);
         }

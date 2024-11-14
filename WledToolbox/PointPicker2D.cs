@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Numerics;
 using System.Windows.Forms;
@@ -20,6 +21,7 @@ internal class PointPicker2D : Control
     private Matrix3x2 _pointTransform = Matrix3x2.Identity;
     private Matrix3x2 _pointTransformInverse = Matrix3x2.Identity;
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Matrix3x2 PointTransform
     {
         get => _pointTransform; set
