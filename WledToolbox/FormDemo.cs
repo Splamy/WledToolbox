@@ -79,10 +79,12 @@ public partial class FormDemo : Form
     {
         while (await updateTimer.WaitForNextTickAsync())
         {
+            framtimeView1.TrackWait();
             if (!desktopDuplicator.GetLatestFrame())
             {
                 continue;
             }
+            framtimeView1.TrackProcess();
 
             ShowDebugInputImage();
             ShowDebugOutputImage();
@@ -90,6 +92,8 @@ public partial class FormDemo : Form
             if (sendWledDataCheckbox.Checked)
             {
                 await wled.Send(desktopDuplicator.OutData);
+                framtimeView1.TrackProcess();
+                framtimeView1.AddFrame();
             }
         }
     }
@@ -108,7 +112,6 @@ public partial class FormDemo : Form
 
         try
         {
-            ;
             using var g = Graphics.FromImage(inputBitmap);
             g.DrawImageUnscaled(desktopDuplicator.MiniImage, 0, 0);
         }

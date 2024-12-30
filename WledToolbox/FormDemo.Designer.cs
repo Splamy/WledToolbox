@@ -50,6 +50,7 @@
             checkDebugOutputImage = new System.Windows.Forms.CheckBox();
             inputDebugPicture = new System.Windows.Forms.CustomPictureBox();
             checkDebugInputImage = new System.Windows.Forms.CheckBox();
+            framtimeView1 = new FramtimeView();
             ((System.ComponentModel.ISupportInitialize)outputDebugPicture).BeginInit();
             groupBox.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)cropLeft).BeginInit();
@@ -67,7 +68,6 @@
             // 
             outputDebugPicture.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             outputDebugPicture.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            outputDebugPicture.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
             outputDebugPicture.Location = new System.Drawing.Point(355, 32);
             outputDebugPicture.Name = "outputDebugPicture";
             outputDebugPicture.Size = new System.Drawing.Size(598, 144);
@@ -108,6 +108,7 @@
             // groupBox
             // 
             groupBox.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left;
+            groupBox.Controls.Add(framtimeView1);
             groupBox.Controls.Add(cropLeft);
             groupBox.Controls.Add(cropBottom);
             groupBox.Controls.Add(cropRight);
@@ -290,7 +291,6 @@
             // 
             inputDebugPicture.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             inputDebugPicture.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            inputDebugPicture.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
             inputDebugPicture.Location = new System.Drawing.Point(355, 207);
             inputDebugPicture.Name = "inputDebugPicture";
             inputDebugPicture.Size = new System.Drawing.Size(598, 503);
@@ -309,6 +309,15 @@
             checkDebugInputImage.Text = "Debug input  image";
             checkDebugInputImage.UseVisualStyleBackColor = true;
             checkDebugInputImage.CheckedChanged += checkDebugInputImage_CheckedChanged;
+            // 
+            // framtimeView1
+            // 
+            framtimeView1.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left;
+            framtimeView1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            framtimeView1.Location = new System.Drawing.Point(7, 610);
+            framtimeView1.Name = "framtimeView1";
+            framtimeView1.Size = new System.Drawing.Size(324, 82);
+            framtimeView1.TabIndex = 23;
             // 
             // FormDemo
             // 
@@ -366,6 +375,7 @@
         private System.Windows.Forms.NumericUpDown cropBottom;
         private System.Windows.Forms.NumericUpDown cropRight;
         private System.Windows.Forms.NumericUpDown cropTop;
+        private FramtimeView framtimeView1;
     }
 }
 
